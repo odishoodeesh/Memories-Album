@@ -53,7 +53,7 @@ console.log('[Server] Starting server.ts...');
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-async function startServer() {
+export async function createServer() {
   await ensureBucketExists();
   const app = express();
   const PORT = 3000;
@@ -234,9 +234,13 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  return app;
 }
 
-startServer();
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  createServer().then(app => {
+    app.listen(3000, '0.0.0.0', () => {
+      console.log('Server running on http://localhost:3000');
+    });
+  });
+}

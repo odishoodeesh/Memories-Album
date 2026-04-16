@@ -66,7 +66,18 @@ export async function createServer() {
 
   // Health Check
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', message: 'Server is running' });
+    res.json({ 
+      status: 'ok', 
+      message: 'Server is running',
+      env: {
+        SUPABASE_URL: !!process.env.SUPABASE_URL,
+        SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+        SUPABASE_S3_ENDPOINT: !!process.env.SUPABASE_S3_ENDPOINT,
+        SUPABASE_S3_ACCESS_KEY_ID: !!process.env.SUPABASE_S3_ACCESS_KEY_ID,
+        SUPABASE_S3_SECRET_ACCESS_KEY: !!process.env.SUPABASE_S3_SECRET_ACCESS_KEY,
+        NODE_ENV: process.env.NODE_ENV
+      }
+    });
   });
 
   app.post('/api/echo', express.json(), (req, res) => {
@@ -121,7 +132,16 @@ export async function createServer() {
         }
 
         // Construct the public URL
-        const projectId = process.env.SUPABASE_S3_ENDPOINT?.split('.')[0].split('//')[1];
+        const endpoint = process.env.SUPABASE_S3_ENDPOINT;
+        if (!endpoint) {
+          throw new Error('SUPABASE_S3_ENDPOINT is not configured');
+        }
+        
+        const projectId = endpoint.split('.')[0].split('//')[1];
+        if (!projectId) {
+          throw new Error('Could not parse project ID from SUPABASE_S3_ENDPOINT');
+        }
+        
         const publicUrl = `https://${projectId}.supabase.co/storage/v1/object/public/${bucket}/${fileName}`;
 
         return publicUrl;

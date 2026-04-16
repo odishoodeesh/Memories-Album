@@ -65,10 +65,21 @@ export async function createServer() {
   });
 
   // Health Check
-  app.get('/api/health', (req, res) => {
+  app.get('/api/health', async (req, res) => {
+    let tableExists = false;
+    try {
+      const { data, error } = await supabase.from('memories').select('id').limit(1);
+      tableExists = !error;
+    } catch (e) {
+      tableExists = false;
+    }
+
     res.json({ 
       status: 'ok', 
       message: 'Server is running',
+      db: {
+        memoriesTableExists: tableExists
+      },
       env: {
         SUPABASE_URL: !!process.env.SUPABASE_URL,
         SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
@@ -133,16 +144,32 @@ export async function createServer() {
 
         // Construct the public URL
         const endpoint = process.env.SUPABASE_S3_ENDPOINT;
-        if (!endpoint) {
-          throw new Error('SUPABASE_S3_ENDPOINT is not configured');
+        const supabaseUrl = process.env.SUPABASE_URL;
+        
+        let projectId = '';
+        if (supabaseUrl) {
+          try {
+            projectId = new URL(supabaseUrl).hostname.split('.')[0];
+          } catch (e) {
+            console.error('[Server] Failed to parse SUPABASE_URL:', e);
+          }
         }
         
-        const projectId = endpoint.split('.')[0].split('//')[1];
+        if (!projectId && endpoint) {
+          try {
+            const url = endpoint.includes('://') ? endpoint : `https://${endpoint}`;
+            projectId = new URL(url).hostname.split('.')[0];
+          } catch (e) {
+            console.error('[Server] Failed to parse SUPABASE_S3_ENDPOINT:', e);
+          }
+        }
+
         if (!projectId) {
-          throw new Error('Could not parse project ID from SUPABASE_S3_ENDPOINT');
+          throw new Error('Could not determine Supabase Project ID. Please check SUPABASE_URL or SUPABASE_S3_ENDPOINT.');
         }
         
         const publicUrl = `https://${projectId}.supabase.co/storage/v1/object/public/${bucket}/${fileName}`;
+        console.log(`[Server] Generated public URL: ${publicUrl}`);
 
         return publicUrl;
       });
@@ -165,8 +192,13 @@ export async function createServer() {
 
       res.json({ urls });
     } catch (error: any) {
-      console.error('Upload error:', error.message || error);
-      res.status(500).json({ error: 'Failed to upload to Supabase S3', details: error.message || String(error) });
+      console.error('[Server] Upload error:', error);
+      res.status(500).json({ 
+        error: 'Upload failed', 
+        message: error.message || String(error),
+        details: error.name || 'UnknownError',
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
     }
   });
 

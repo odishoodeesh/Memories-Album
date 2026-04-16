@@ -12,16 +12,39 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Image as ImageIcon, X, Heart } from 'lucide-react';
 
+interface Memory {
+  id: string;
+  image_url: string;
+  created_at: string;
+}
+
 export default function App() {
-  const [images, setImages] = useState<string[]>([]);
+  const [memories, setMemories] = useState<Memory[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetch('/api/health')
-      .then(res => res.json())
-      .then(data => console.log('[App] Server health:', data))
-      .catch(err => console.error('[App] Server health check failed:', err));
+    const init = async () => {
+      try {
+        const healthRes = await fetch('/api/health');
+        const healthData = await healthRes.json();
+        console.log('[App] Server health:', healthData);
+
+        const memoriesRes = await fetch('/api/memories');
+        if (memoriesRes.ok) {
+          const data = await memoriesRes.json();
+          setMemories(data);
+        } else if (memoriesRes.status === 404) {
+          const errorData = await memoriesRes.json();
+          if (errorData.error === 'Table not found') {
+            console.warn('[App] Database table "memories" is missing. Please run the setup SQL.');
+          }
+        }
+      } catch (err) {
+        console.error('[App] Initial fetch failed:', err);
+      }
+    };
+    init();
   }, []);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -55,8 +78,12 @@ export default function App() {
       }
 
       if (contentType && contentType.includes('application/json')) {
-        const data = await response.json();
-        setImages(prev => [...data.urls, ...prev]);
+        // Refresh memories from server to get real IDs and timestamps
+        const memoriesRes = await fetch('/api/memories');
+        if (memoriesRes.ok) {
+          const data = await memoriesRes.json();
+          setMemories(data);
+        }
       } else {
         const text = await response.text();
         console.error('Unexpected response format:', text);
@@ -69,15 +96,27 @@ export default function App() {
       }
     } catch (error) {
       console.error('Upload error:', error);
-      alert('Failed to upload images. Please check your connection and try again.');
+      alert(error instanceof Error ? error.message : 'Failed to upload images.');
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  const removeImage = (index: number) => {
-    setImages(prev => prev.filter((_, i) => i !== index));
+  const removeImage = async (id: string) => {
+    try {
+      const response = await fetch(`/api/memories/${id}`, {
+        method: 'DELETE',
+      });
+      if (response.ok) {
+        setMemories(prev => prev.filter(m => m.id !== id));
+      } else {
+        throw new Error('Failed to delete memory from server');
+      }
+    } catch (error) {
+      console.error('[App] Delete failed:', error);
+      alert('Failed to delete memory. Please try again.');
+    }
   };
 
   return (
@@ -92,14 +131,14 @@ export default function App() {
           animate={{ opacity: 1, x: 0 }}
           className="font-serif text-2xl italic tracking-tight"
         >
-          The Archive
+          Memories Album
         </motion.div>
         <motion.div 
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           className="text-[10px] md:text-xs uppercase tracking-[0.2em] opacity-60"
         >
-          Vol. 01 — {images.length} Entries
+          Vol. 01 — {memories.length} Entries
         </motion.div>
       </header>
 
@@ -140,16 +179,16 @@ export default function App() {
 
       {/* Album Grid (Visible when images exist) */}
       <AnimatePresence>
-        {images.length > 0 && (
+        {memories.length > 0 && (
           <motion.div 
             initial={{ opacity: 0, y: 40 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 40 }}
             className="w-full max-w-6xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-12 mb-20"
           >
-            {images.map((src, index) => (
+            {memories.map((memory, index) => (
               <motion.div
-                key={src}
+                key={memory.id}
                 layout
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
@@ -157,7 +196,7 @@ export default function App() {
               >
                 <div className="aspect-[4/5] overflow-hidden bg-white border border-ink-theme/10">
                   <img 
-                    src={src} 
+                    src={memory.image_url} 
                     alt={`Memory ${index}`} 
                     className="w-full h-full object-cover transition-transform duration-[2s] group-hover:scale-105"
                     referrerPolicy="no-referrer"
@@ -167,7 +206,7 @@ export default function App() {
                 {/* Overlay Controls */}
                 <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button 
-                    onClick={() => removeImage(index)}
+                    onClick={() => removeImage(memory.id)}
                     className="bg-bg-theme/90 text-ink-theme p-2 border border-ink-theme/20 hover:bg-ink-theme hover:text-bg-theme transition-colors"
                   >
                     <X size={14} />
@@ -176,10 +215,10 @@ export default function App() {
 
                 <div className="mt-4 flex justify-between items-baseline">
                   <span className="font-serif italic text-xs opacity-60">
-                    {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    {new Date(memory.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                   </span>
                   <span className="text-[10px] uppercase tracking-widest opacity-40">
-                    #{String(images.length - index).padStart(3, '0')}
+                    #{String(memories.length - index).padStart(3, '0')}
                   </span>
                 </div>
               </motion.div>
@@ -191,11 +230,11 @@ export default function App() {
       {/* Footer */}
       <footer className="flex justify-between items-end border-t border-ink-theme/10 pt-8 z-10">
         <div className="text-[10px] leading-relaxed max-w-[200px] text-accent-theme uppercase tracking-wider">
-          Last addition: {images.length > 0 ? new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'None'}<br />
-          Archive Status: {images.length > 0 ? 'Active' : 'Empty'}
+          Last addition: {memories.length > 0 ? new Date(memories[0].created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'None'}<br />
+          Archive Status: {memories.length > 0 ? 'Active' : 'Empty'}
         </div>
         <div className="font-serif italic text-sm opacity-60">
-          {images.length > 0 ? 'Scroll to explore' : 'Select an image to begin'}
+          {memories.length > 0 ? 'Scroll to explore' : 'Select an image to begin'}
         </div>
       </footer>
     </div>

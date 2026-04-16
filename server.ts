@@ -128,10 +128,69 @@ async function startServer() {
       });
 
       const urls = await Promise.all(uploadPromises);
+
+      // Persist to Supabase Database
+      const { error: dbError } = await supabase
+        .from('memories')
+        .insert(urls.map(url => ({ image_url: url })));
+
+      if (dbError) {
+        console.error('[Server] Database insertion error:', dbError.message, dbError.details, dbError.hint);
+        if (dbError.message.includes('relation "public.memories" does not exist')) {
+          console.error('[Server] CRITICAL: The "memories" table does not exist in your Supabase database. Please run the SQL provided to create it.');
+        }
+        // We still return the URLs because the upload succeeded, 
+        // but the user should know persistence failed.
+      }
+
       res.json({ urls });
+    } catch (error: any) {
+      console.error('Upload error:', error.message || error);
+      res.status(500).json({ error: 'Failed to upload to Supabase S3', details: error.message || String(error) });
+    }
+  });
+
+  // Fetch all memories
+  app.get('/api/memories', async (req, res) => {
+    console.log('[Server] Fetching memories...');
+    try {
+      const { data, error } = await supabase
+        .from('memories')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('[Server] Supabase Fetch Error:', error.message, error.details, error.hint);
+        if (error.message.includes('relation "public.memories" does not exist')) {
+          return res.status(404).json({ 
+            error: 'Table not found', 
+            message: 'The "memories" table does not exist. Please run the setup SQL in your Supabase dashboard.' 
+          });
+        }
+        throw error;
+      }
+      res.json(data || []);
+    } catch (error: any) {
+      console.error('[Server] Fetch error:', error.message || error);
+      res.status(500).json({ error: 'Failed to fetch memories', details: error.message || String(error) });
+    }
+  });
+
+  // Delete a memory
+  app.delete('/api/memories/:id', async (req, res) => {
+    const { id } = req.params;
+    console.log(`[Server] Deleting memory: ${id}`);
+    try {
+      const { error } = await supabase
+        .from('memories')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      res.json({ success: true });
     } catch (error) {
-      console.error('Upload error:', error);
-      res.status(500).json({ error: 'Failed to upload to Supabase S3', details: error instanceof Error ? error.message : String(error) });
+      console.error('[Server] Delete error:', error);
+      res.status(500).json({ error: 'Failed to delete memory' });
     }
   });
 
